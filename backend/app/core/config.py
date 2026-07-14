@@ -1,6 +1,7 @@
 import secrets
 import warnings
 from typing import Annotated, Any, Literal, Self
+from urllib.parse import quote
 
 from pydantic import (
     AnyUrl,
@@ -60,8 +61,8 @@ class Settings(BaseSettings):
     def SQLALCHEMY_DATABASE_URI(self) -> PostgresDsn:
         return PostgresDsn.build(
             scheme="postgresql+psycopg",
-            username=self.POSTGRES_USER,
-            password=self.POSTGRES_PASSWORD,
+            username=quote(self.POSTGRES_USER, safe=""),
+            password=quote(self.POSTGRES_PASSWORD, safe=""),
             host=self.POSTGRES_SERVER,
             port=self.POSTGRES_PORT,
             path=self.POSTGRES_DB,

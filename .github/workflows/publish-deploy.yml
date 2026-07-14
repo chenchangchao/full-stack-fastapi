@@ -1,0 +1,146 @@
+name: Publish and deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  BACKEND_IMAGE: ghcr.io/chenchangchao/full-stack-fastapi-backend
+  FRONTEND_IMAGE: ghcr.io/chenchangchao/full-stack-fastapi-frontend
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Log in to GHCR
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build and push backend
+        run: |
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            -f backend/Dockerfile \
+            -t "$BACKEND_IMAGE:${GITHUB_SHA}" \
+            -t "$BACKEND_IMAGE:latest" \
+            .
+          docker push "$BACKEND_IMAGE:${GITHUB_SHA}"
+          docker push "$BACKEND_IMAGE:latest"
+      - name: Build and push frontend
+        run: |
+          docker build \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            --build-arg VITE_API_URL=https://api-fast-fs.chenchangchao.com \
+            -f frontend/Dockerfile \
+            -t "$FRONTEND_IMAGE:${GITHUB_SHA}" \
+            -t "$FRONTEND_IMAGE:latest" \
+            .
+          docker push "$FRONTEND_IMAGE:${GITHUB_SHA}"
+          docker push "$FRONTEND_IMAGE:latest"
+
+  deploy:
+    needs: publish
+    if: ${{ vars.DEPLOY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Create production environment file
+        env:
+          PROJECT_NAME: ${{ vars.PROJECT_NAME }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          FIRST_SUPERUSER: ${{ secrets.FIRST_SUPERUSER }}
+          FIRST_SUPERUSER_PASSWORD: ${{ secrets.FIRST_SUPERUSER_PASSWORD }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          EMAILS_FROM_EMAIL: ${{ secrets.EMAILS_FROM_EMAIL }}
+          POSTGRES_SERVER: ${{ secrets.POSTGRES_SERVER }}
+          POSTGRES_PORT: ${{ secrets.POSTGRES_PORT }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+        run: |
+          set -euo pipefail
+          write_env() {
+            printf '%s=' "$1"
+            jq -Rn --arg value "$2" '$value'
+          }
+          umask 077
+          {
+            write_env ENVIRONMENT production
+            write_env DOMAIN chenchangchao.com
+            write_env PROJECT_NAME "$PROJECT_NAME"
+            write_env FRONTEND_HOST https://fast-dashboard.chenchangchao.com
+            write_env BACKEND_CORS_ORIGINS https://fast-dashboard.chenchangchao.com
+            write_env SECRET_KEY "$SECRET_KEY"
+            write_env FIRST_SUPERUSER "$FIRST_SUPERUSER"
+            write_env FIRST_SUPERUSER_PASSWORD "$FIRST_SUPERUSER_PASSWORD"
+            write_env SMTP_HOST "$SMTP_HOST"
+            write_env SMTP_USER "$SMTP_USER"
+            write_env SMTP_PASSWORD "$SMTP_PASSWORD"
+            write_env EMAILS_FROM_EMAIL "$EMAILS_FROM_EMAIL"
+            write_env SMTP_TLS True
+            write_env SMTP_SSL False
+            write_env SMTP_PORT 587
+            write_env POSTGRES_SERVER "$POSTGRES_SERVER"
+            write_env POSTGRES_PORT "$POSTGRES_PORT"
+            write_env POSTGRES_DB "$POSTGRES_DB"
+            write_env POSTGRES_USER "$POSTGRES_USER"
+            write_env POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
+            write_env SENTRY_DSN "$SENTRY_DSN"
+          } > production.env
+      - name: Configure SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+      - name: Upload deployment files
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+        run: |
+          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" 'mkdir -p ~/apps/full-stack-fastapi'
+          scp -P "$DEPLOY_PORT" compose.production.yml production.env \
+            "$DEPLOY_USER@$DEPLOY_HOST:~/apps/full-stack-fastapi/"
+      - name: Deploy containers
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          printf '%s' "$GHCR_TOKEN" | ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
+          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd ~/apps/full-stack-fastapi && \
+             IMAGE_TAG='${GITHUB_SHA}' docker compose --env-file production.env -f compose.production.yml pull && \
+             IMAGE_TAG='${GITHUB_SHA}' docker compose --env-file production.env -f compose.production.yml up -d --remove-orphans && \
+             docker image prune -f"
+      - name: Verify deployment
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+        run: |
+          ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "curl --fail --retry 12 --retry-delay 5 http://127.0.0.1:8000/api/v1/utils/health-check/"
