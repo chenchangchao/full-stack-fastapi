@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router"
 
 import {
   type Body_login_login_access_token as AccessToken,
+  type EmailCodeVerify,
   LoginService,
   type UserPublic,
   type UserRegister,
@@ -53,6 +54,19 @@ const useAuth = () => {
     onError: handleError.bind(showErrorToast),
   })
 
+  const loginWithCode = async (data: EmailCodeVerify) => {
+    const response = await LoginService.loginWithCode({ requestBody: data })
+    localStorage.setItem("access_token", response.access_token)
+  }
+
+  const codeLoginMutation = useMutation({
+    mutationFn: loginWithCode,
+    onSuccess: () => {
+      navigate({ to: "/" })
+    },
+    onError: handleError.bind(showErrorToast),
+  })
+
   const logout = () => {
     localStorage.removeItem("access_token")
     navigate({ to: "/login" })
@@ -61,6 +75,7 @@ const useAuth = () => {
   return {
     signUpMutation,
     loginMutation,
+    codeLoginMutation,
     logout,
     user,
   }

@@ -101,6 +101,29 @@ def generate_new_account_email(
     return EmailData(html_content=html_content, subject=subject)
 
 
+def generate_verification_code_email(
+    *, email_to: str, code: str, purpose: str
+) -> EmailData:
+    purpose_labels = {
+        "signup": "complete your registration",
+        "login": "log in to your account",
+        "password_reset": "reset your password",
+    }
+    action = purpose_labels.get(purpose, "verify your email address")
+    subject = f"{settings.PROJECT_NAME} - Your verification code"
+    html_content = render_email_template(
+        template_name="verification_code.html",
+        context={
+            "project_name": settings.PROJECT_NAME,
+            "email": email_to,
+            "code": code,
+            "action": action,
+            "valid_minutes": settings.EMAIL_CODE_EXPIRE_MINUTES,
+        },
+    )
+    return EmailData(html_content=html_content, subject=subject)
+
+
 def generate_password_reset_token(email: str) -> str:
     delta = timedelta(hours=settings.EMAIL_RESET_TOKEN_EXPIRE_HOURS)
     now = datetime.now(UTC)

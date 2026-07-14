@@ -60,3 +60,24 @@ export function findLastEmail({
 
   return Promise.race([timeoutPromise, checkEmails()])
 }
+
+export async function findVerificationCode({
+  request,
+  email,
+}: {
+  request: APIRequestContext
+  email: string
+}) {
+  const emailData = await findLastEmail({
+    request,
+    filter: (message) => message.recipients.includes(`<${email}>`),
+  })
+  if (!emailData) throw new Error("Verification email not found")
+  const response = await request.get(
+    `${process.env.MAILCATCHER_HOST}/messages/${emailData.id}.html`,
+  )
+  const html = await response.text()
+  const code = html.match(/\b\d{6}\b/)?.[0]
+  if (!code) throw new Error("Verification code not found in email")
+  return code
+}

@@ -9,15 +9,45 @@ from app import crud
 from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
 from app.core import security
 from app.core.config import settings
-from app.models import Message, NewPassword, Token, UserPublic, UserUpdate
+from app.email_codes import (
+    EmailCodeCooldownError,
+    EmailCodeError,
+    issue_email_code,
+    normalize_email,
+    verify_email_code,
+)
+from app.models import (
+    EmailCodeRequest,
+    EmailCodeVerify,
+    Message,
+    NewPassword,
+    PasswordResetCode,
+    Token,
+    UserPublic,
+    UserUpdate,
+)
 from app.utils import (
     generate_password_reset_token,
     generate_reset_password_email,
+    generate_verification_code_email,
     send_email,
     verify_password_reset_token,
 )
 
 router = APIRouter(tags=["login"])
+
+
+def _send_code(*, email: str, code: str, purpose: str) -> None:
+    email_data = generate_verification_code_email(
+        email_to=email,
+        code=code,
+        purpose=purpose,
+    )
+    send_email(
+        email_to=email,
+        subject=email_data.subject,
+        html_content=email_data.html_content,
+    )
 
 
 @router.post("/login/access-token")
@@ -34,6 +64,46 @@ def login_access_token(
         raise HTTPException(status_code=400, detail="Incorrect email or password")
     elif not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    return Token(
+        access_token=security.create_access_token(
+            user.id, expires_delta=access_token_expires
+        )
+    )
+
+
+@router.post("/login/code/request", response_model=Message)
+def request_login_code(session: SessionDep, body: EmailCodeRequest) -> Message:
+    """Send a login code without revealing whether the account exists."""
+    email = normalize_email(str(body.email))
+    user = crud.get_user_by_email(session=session, email=email)
+    if settings.emails_enabled and user and user.is_active:
+        try:
+            code = issue_email_code(session=session, email=email, purpose="login")
+            _send_code(email=email, code=code, purpose="login")
+        except EmailCodeCooldownError:
+            pass
+    return Message(message="If that email is registered, we sent a login code")
+
+
+@router.post("/login/code", response_model=Token)
+def login_with_code(session: SessionDep, body: EmailCodeVerify) -> Token:
+    """Exchange a one-time email code for an access token."""
+    email = normalize_email(str(body.email))
+    user = crud.get_user_by_email(session=session, email=email)
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=400, detail="Invalid or expired verification code"
+        )
+    try:
+        verify_email_code(
+            session=session,
+            email=email,
+            purpose="login",
+            code=body.code,
+        )
+    except EmailCodeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     return Token(
         access_token=security.create_access_token(
@@ -74,6 +144,24 @@ def recover_password(email: str, session: SessionDep) -> Message:
     )
 
 
+@router.post("/password-recovery/code/request", response_model=Message)
+def request_password_reset_code(session: SessionDep, body: EmailCodeRequest) -> Message:
+    """Send a password reset code without revealing whether the account exists."""
+    email = normalize_email(str(body.email))
+    user = crud.get_user_by_email(session=session, email=email)
+    if settings.emails_enabled and user and user.is_active:
+        try:
+            code = issue_email_code(
+                session=session,
+                email=email,
+                purpose="password_reset",
+            )
+            _send_code(email=email, code=code, purpose="password_reset")
+        except EmailCodeCooldownError:
+            pass
+    return Message(message="If that email is registered, we sent a password reset code")
+
+
 @router.post("/reset-password/")
 def reset_password(session: SessionDep, body: NewPassword) -> Message:
     """
@@ -93,6 +181,32 @@ def reset_password(session: SessionDep, body: NewPassword) -> Message:
         session=session,
         db_user=user,
         user_in=user_in_update,
+    )
+    return Message(message="Password updated successfully")
+
+
+@router.post("/reset-password/code", response_model=Message)
+def reset_password_with_code(session: SessionDep, body: PasswordResetCode) -> Message:
+    """Reset a password with a one-time email code."""
+    email = normalize_email(str(body.email))
+    user = crud.get_user_by_email(session=session, email=email)
+    if not user or not user.is_active:
+        raise HTTPException(
+            status_code=400, detail="Invalid or expired verification code"
+        )
+    try:
+        verify_email_code(
+            session=session,
+            email=email,
+            purpose="password_reset",
+            code=body.code,
+        )
+    except EmailCodeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    crud.update_user(
+        session=session,
+        db_user=user,
+        user_in=UserUpdate(password=body.new_password),
     )
     return Message(message="Password updated successfully")
 

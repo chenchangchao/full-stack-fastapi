@@ -1,6 +1,7 @@
 import { expect, type Page, test } from "@playwright/test"
-
+import { findVerificationCode } from "./utils/mailcatcher"
 import { randomEmail, randomPassword } from "./utils/random"
+import { signUpNewUser } from "./utils/user"
 
 test.use({ storageState: { cookies: [], origins: [] } })
 
@@ -31,6 +32,7 @@ test("Inputs are visible, empty and editable", async ({ page }) => {
   await verifyInput(page, "email-input")
   await verifyInput(page, "password-input")
   await verifyInput(page, "confirm-password-input")
+  await verifyInput(page, "verification-code-input")
 })
 
 test("Sign Up button is visible", async ({ page }) => {
@@ -52,7 +54,11 @@ test("Sign up with valid name, email, and password", async ({ page }) => {
 
   await page.goto("/signup")
   await fillForm(page, full_name, email, password, password)
+  await page.getByRole("button", { name: "Send code" }).click()
+  const code = await findVerificationCode({ request: page.request, email })
+  await page.getByTestId("verification-code-input").fill(code)
   await page.getByRole("button", { name: "Sign Up" }).click()
+  await expect(page).toHaveURL(/\/login$/)
 })
 
 test("Sign up with invalid email", async ({ page }) => {
@@ -75,15 +81,12 @@ test("Sign up with existing email", async ({ page }) => {
   const email = randomEmail()
   const password = randomPassword()
 
-  await page.goto("/signup")
-
-  await fillForm(page, fullName, email, password, password)
-  await page.getByRole("button", { name: "Sign Up" }).click()
+  await signUpNewUser(page, fullName, email, password)
 
   await page.goto("/signup")
 
   await fillForm(page, fullName, email, password, password)
-  await page.getByRole("button", { name: "Sign Up" }).click()
+  await page.getByRole("button", { name: "Send code" }).click()
 
   await page
     .getByText("The user with this email already exists in the system")

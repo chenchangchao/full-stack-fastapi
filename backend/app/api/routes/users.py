@@ -12,7 +12,15 @@ from app.api.deps import (
 )
 from app.core.config import settings
 from app.core.security import get_password_hash, verify_password
+from app.email_codes import (
+    EmailCodeCooldownError,
+    EmailCodeError,
+    issue_email_code,
+    normalize_email,
+    verify_email_code,
+)
 from app.models import (
+    EmailCodeRequest,
     Item,
     Message,
     UpdatePassword,
@@ -24,7 +32,11 @@ from app.models import (
     UserUpdate,
     UserUpdateMe,
 )
-from app.utils import generate_new_account_email, send_email
+from app.utils import (
+    generate_new_account_email,
+    generate_verification_code_email,
+    send_email,
+)
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -148,15 +160,59 @@ def register_user(session: SessionDep, user_in: UserRegister) -> Any:
     """
     Create new user without the need to be logged in.
     """
-    user = crud.get_user_by_email(session=session, email=user_in.email)
+    email = normalize_email(str(user_in.email))
+    user = crud.get_user_by_email(session=session, email=email)
     if user:
         raise HTTPException(
             status_code=400,
             detail="The user with this email already exists in the system",
         )
-    user_create = UserCreate.model_validate(user_in)
+    try:
+        verify_email_code(
+            session=session,
+            email=email,
+            purpose="signup",
+            code=user_in.verification_code,
+        )
+    except EmailCodeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    user_create = UserCreate.model_validate(
+        {**user_in.model_dump(exclude={"verification_code"}), "email": email}
+    )
     user = crud.create_user(session=session, user_create=user_create)
     return user
+
+
+@router.post("/signup/code", response_model=Message)
+def request_signup_code(session: SessionDep, body: EmailCodeRequest) -> Message:
+    """Send a one-time code required to create an account."""
+    if not settings.emails_enabled:
+        raise HTTPException(status_code=503, detail="Email service is not configured")
+    email = normalize_email(str(body.email))
+    if crud.get_user_by_email(session=session, email=email):
+        raise HTTPException(
+            status_code=400,
+            detail="The user with this email already exists in the system",
+        )
+    try:
+        code = issue_email_code(session=session, email=email, purpose="signup")
+    except EmailCodeCooldownError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=str(exc),
+            headers={"Retry-After": str(exc.retry_after)},
+        ) from exc
+    email_data = generate_verification_code_email(
+        email_to=email,
+        code=code,
+        purpose="signup",
+    )
+    send_email(
+        email_to=email,
+        subject=email_data.subject,
+        html_content=email_data.html_content,
+    )
+    return Message(message="Verification code sent")
 
 
 @router.get("/{user_id}", response_model=UserPublic)

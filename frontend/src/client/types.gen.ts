@@ -9,6 +9,15 @@ export type Body_login_login_access_token = {
     client_secret?: (string | null);
 };
 
+export type EmailCodeRequest = {
+    email: string;
+};
+
+export type EmailCodeVerify = {
+    email: string;
+    code: string;
+};
+
 export type HTTPValidationError = {
     detail?: Array<ValidationError>;
 };
@@ -42,6 +51,12 @@ export type Message = {
 
 export type NewPassword = {
     token: string;
+    new_password: string;
+};
+
+export type PasswordResetCode = {
+    email: string;
+    code: string;
     new_password: string;
 };
 
@@ -83,6 +98,7 @@ export type UserRegister = {
     email: string;
     password: string;
     full_name?: (string | null);
+    verification_code: string;
 };
 
 export type UsersPublic = {
@@ -151,6 +167,18 @@ export type LoginLoginAccessTokenData = {
 
 export type LoginLoginAccessTokenResponse = (Token);
 
+export type LoginRequestLoginCodeData = {
+    requestBody: EmailCodeRequest;
+};
+
+export type LoginRequestLoginCodeResponse = (Message);
+
+export type LoginLoginWithCodeData = {
+    requestBody: EmailCodeVerify;
+};
+
+export type LoginLoginWithCodeResponse = (Token);
+
 export type LoginTestTokenResponse = (UserPublic);
 
 export type LoginRecoverPasswordData = {
@@ -159,11 +187,23 @@ export type LoginRecoverPasswordData = {
 
 export type LoginRecoverPasswordResponse = (Message);
 
+export type LoginRequestPasswordResetCodeData = {
+    requestBody: EmailCodeRequest;
+};
+
+export type LoginRequestPasswordResetCodeResponse = (Message);
+
 export type LoginResetPasswordData = {
     requestBody: NewPassword;
 };
 
 export type LoginResetPasswordResponse = (Message);
+
+export type LoginResetPasswordWithCodeData = {
+    requestBody: PasswordResetCode;
+};
+
+export type LoginResetPasswordWithCodeResponse = (Message);
 
 export type LoginRecoverPasswordHtmlContentData = {
     email: string;
@@ -211,6 +251,12 @@ export type UsersRegisterUserData = {
 };
 
 export type UsersRegisterUserResponse = (UserPublic);
+
+export type UsersRequestSignupCodeData = {
+    requestBody: EmailCodeRequest;
+};
+
+export type UsersRequestSignupCodeResponse = (Message);
 
 export type UsersReadUserByIdData = {
     userId: string;

@@ -7,6 +7,7 @@ from sqlmodel import Session
 from app.core.config import settings
 from app.core.security import get_password_hash, verify_password
 from app.crud import create_user
+from app.email_codes import issue_email_code
 from app.models import User, UserCreate
 from app.utils import generate_password_reset_token
 from tests.utils.user import user_authentication_headers
@@ -32,6 +33,28 @@ def test_get_access_token_incorrect_password(client: TestClient) -> None:
     }
     r = client.post(f"{settings.API_V1_STR}/login/access-token", data=login_data)
     assert r.status_code == 400
+
+
+def test_login_with_email_code(client: TestClient, db: Session) -> None:
+    email = random_email()
+    password = random_lower_string()
+    create_user(session=db, user_create=UserCreate(email=email, password=password))
+    code = issue_email_code(session=db, email=email, purpose="login")
+
+    r = client.post(
+        f"{settings.API_V1_STR}/login/code",
+        json={"email": email, "code": code},
+    )
+
+    assert r.status_code == 200
+    assert r.json()["access_token"]
+
+    reused = client.post(
+        f"{settings.API_V1_STR}/login/code",
+        json={"email": email, "code": code},
+    )
+    assert reused.status_code == 400
+    assert reused.json()["detail"] == "Invalid or expired verification code"
 
 
 def test_use_access_token(
@@ -124,6 +147,49 @@ def test_reset_password_invalid_token(
     assert "detail" in response
     assert r.status_code == 400
     assert response["detail"] == "Invalid token"
+
+
+def test_reset_password_with_email_code(client: TestClient, db: Session) -> None:
+    email = random_email()
+    password = random_lower_string()
+    new_password = random_lower_string()
+    user = create_user(
+        session=db,
+        user_create=UserCreate(email=email, password=password),
+    )
+    code = issue_email_code(session=db, email=email, purpose="password_reset")
+
+    r = client.post(
+        f"{settings.API_V1_STR}/reset-password/code",
+        json={"email": email, "code": code, "new_password": new_password},
+    )
+
+    assert r.status_code == 200
+    db.refresh(user)
+    verified, _ = verify_password(new_password, user.hashed_password)
+    assert verified
+
+
+def test_email_code_locks_after_too_many_attempts(
+    client: TestClient, db: Session
+) -> None:
+    email = random_email()
+    password = random_lower_string()
+    create_user(session=db, user_create=UserCreate(email=email, password=password))
+    code = issue_email_code(session=db, email=email, purpose="login")
+
+    for _ in range(settings.EMAIL_CODE_MAX_ATTEMPTS):
+        r = client.post(
+            f"{settings.API_V1_STR}/login/code",
+            json={"email": email, "code": "999999"},
+        )
+        assert r.status_code == 400
+
+    locked = client.post(
+        f"{settings.API_V1_STR}/login/code",
+        json={"email": email, "code": code},
+    )
+    assert locked.status_code == 400
 
 
 def test_login_with_bcrypt_password_upgrades_to_argon2(

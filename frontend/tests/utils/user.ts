@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test"
+import { findVerificationCode } from "./mailcatcher"
 
 export async function signUpNewUser(
   page: Page,
@@ -12,6 +13,9 @@ export async function signUpNewUser(
   await page.getByTestId("email-input").fill(email)
   await page.getByTestId("password-input").fill(password)
   await page.getByTestId("confirm-password-input").fill(password)
+  await page.getByRole("button", { name: "Send code" }).click()
+  const code = await findVerificationCode({ request: page.request, email })
+  await page.getByTestId("verification-code-input").fill(code)
   await page.getByRole("button", { name: "Sign Up" }).click()
   await page.goto("/login")
 }

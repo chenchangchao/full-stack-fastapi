@@ -6,7 +6,9 @@ import {
 } from "@tanstack/react-router"
 import { useForm } from "react-hook-form"
 import { z } from "zod"
+import { UsersService } from "@/client"
 import { AuthLayout } from "@/components/Common/AuthLayout"
+import { Button } from "@/components/ui/button"
 import {
   Form,
   FormControl,
@@ -19,6 +21,7 @@ import { Input } from "@/components/ui/input"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { PasswordInput } from "@/components/ui/password-input"
 import useAuth, { isLoggedIn } from "@/hooks/useAuth"
+import { useEmailCode } from "@/hooks/useEmailCode"
 
 const formSchema = z
   .object({
@@ -31,6 +34,9 @@ const formSchema = z
     confirm_password: z
       .string()
       .min(1, { message: "Password confirmation is required" }),
+    verification_code: z
+      .string()
+      .regex(/^\d{6}$/, { message: "Enter the 6-digit verification code" }),
   })
   .refine((data) => data.password === data.confirm_password, {
     message: "The passwords don't match",
@@ -59,6 +65,9 @@ export const Route = createFileRoute("/signup")({
 
 function SignUp() {
   const { signUpMutation } = useAuth()
+  const emailCode = useEmailCode((email) =>
+    UsersService.requestSignupCode({ requestBody: { email } }),
+  )
   const form = useForm<FormData>({
     resolver: zodResolver(formSchema),
     mode: "onBlur",
@@ -68,6 +77,7 @@ function SignUp() {
       full_name: "",
       password: "",
       confirm_password: "",
+      verification_code: "",
     },
   })
 
@@ -77,6 +87,11 @@ function SignUp() {
     // exclude confirm_password from submission data
     const { confirm_password: _confirm_password, ...submitData } = data
     signUpMutation.mutate(submitData)
+  }
+
+  const sendCode = async () => {
+    const valid = await form.trigger("email")
+    if (valid) emailCode.sendCode(form.getValues("email"))
   }
 
   return (
@@ -142,6 +157,38 @@ function SignUp() {
                       {...field}
                     />
                   </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="verification_code"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Email Verification Code</FormLabel>
+                  <div className="flex gap-2">
+                    <FormControl>
+                      <Input
+                        data-testid="verification-code-input"
+                        inputMode="numeric"
+                        maxLength={6}
+                        placeholder="6-digit code"
+                        {...field}
+                      />
+                    </FormControl>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      disabled={emailCode.isPending || emailCode.cooldown > 0}
+                      onClick={sendCode}
+                    >
+                      {emailCode.cooldown > 0
+                        ? `${emailCode.cooldown}s`
+                        : "Send code"}
+                    </Button>
+                  </div>
                   <FormMessage />
                 </FormItem>
               )}

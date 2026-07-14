@@ -57,6 +57,40 @@ export const Body_login_login_access_tokenSchema = {
     title: 'Body_login-login_access_token'
 } as const;
 
+export const EmailCodeRequestSchema = {
+    properties: {
+        email: {
+            type: 'string',
+            maxLength: 255,
+            format: 'email',
+            title: 'Email'
+        }
+    },
+    type: 'object',
+    required: ['email'],
+    title: 'EmailCodeRequest'
+} as const;
+
+export const EmailCodeVerifySchema = {
+    properties: {
+        email: {
+            type: 'string',
+            maxLength: 255,
+            format: 'email',
+            title: 'Email'
+        },
+        code: {
+            type: 'string',
+            maxLength: 6,
+            minLength: 6,
+            title: 'Code'
+        }
+    },
+    type: 'object',
+    required: ['email', 'code'],
+    title: 'EmailCodeVerify'
+} as const;
+
 export const HTTPValidationErrorSchema = {
     properties: {
         detail: {
@@ -224,6 +258,32 @@ export const NewPasswordSchema = {
     type: 'object',
     required: ['token', 'new_password'],
     title: 'NewPassword'
+} as const;
+
+export const PasswordResetCodeSchema = {
+    properties: {
+        email: {
+            type: 'string',
+            maxLength: 255,
+            format: 'email',
+            title: 'Email'
+        },
+        code: {
+            type: 'string',
+            maxLength: 6,
+            minLength: 6,
+            title: 'Code'
+        },
+        new_password: {
+            type: 'string',
+            maxLength: 128,
+            minLength: 8,
+            title: 'New Password'
+        }
+    },
+    type: 'object',
+    required: ['email', 'code', 'new_password'],
+    title: 'PasswordResetCode'
 } as const;
 
 export const PrivateUserCreateSchema = {
@@ -408,10 +468,16 @@ export const UserRegisterSchema = {
                 }
             ],
             title: 'Full Name'
+        },
+        verification_code: {
+            type: 'string',
+            maxLength: 6,
+            minLength: 6,
+            title: 'Verification Code'
         }
     },
     type: 'object',
-    required: ['email', 'password'],
+    required: ['email', 'password', 'verification_code'],
     title: 'UserRegister'
 } as const;
 

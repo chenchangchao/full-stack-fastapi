@@ -84,6 +84,9 @@ class Settings(BaseSettings):
         return self
 
     EMAIL_RESET_TOKEN_EXPIRE_HOURS: int = 48
+    EMAIL_CODE_EXPIRE_MINUTES: int = 10
+    EMAIL_CODE_RESEND_SECONDS: int = 60
+    EMAIL_CODE_MAX_ATTEMPTS: int = 5
 
     @computed_field  # type: ignore[prop-decorator]
     @property
